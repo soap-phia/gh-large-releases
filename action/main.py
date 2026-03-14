@@ -177,61 +177,65 @@ def get_assets(release, args):
 
 # update release body to include links to the cf worker
 def update_release_body(args):
-  tag_start = "<!-- START_BIG_ASSET_LIST_DO_NOT_REMOVE -->"
-  tag_end = "<!-- END_BIG_ASSET_LIST_DO_NOT_REMOVE -->"
-  table_lines = [
+    tag_start = "<!-- START_BIG_ASSET_LIST_DO_NOT_REMOVE -->"
+    tag_end = "<!-- END_BIG_ASSET_LIST_DO_NOT_REMOVE -->"
+    table_lines = [
     tag_start,
     "Release files generated with [ading2210/gh-large-releases](https://github.com/ading2210/gh-large-releases).",
     "| File Name | Size | SHA-256 Hash |", 
     "| --------- | ---- | ------------ |"
   ]
-  release = get_release(args)
-  assets = get_assets(release, args)
-  
-  manifests = []
-  for asset in assets:
-    if not asset["name"].endswith(".manifest"):
-      continue
-    r = session.get(asset["url"], headers={
+    release = get_release(args)
+    assets = get_assets(release, args)
+
+    manifests = []
+    for asset in assets:
+        if not asset["name"].endswith(".manifest"):
+            continue
+        r = session.get(asset["url"], headers={
       "Accept": "application/octet-stream"
     })
-    manifests.append(r.json())
+        manifests.append(r.json())
 
-  manifests.sort(key=lambda x: x["name"])
-  for manifest in manifests:
-    worker_url = args.worker_url or "https://gh-releases.ading2210.workers.dev"
-    download_url = f"{worker_url}/{args.repository}/releases/download/{get_tag_name(args.tag_name)}/{manifest['name']}"
-    download_link = f"[{manifest['name']}]({download_url})"
-    line = f"| {download_link} | {pretty_size(manifest['size'])} | <sub><sup>`{manifest['hash']}`</sub></sup> |"
-    table_lines.append(line)
-    
-  table_lines.append("> [!IMPORTANT]")
-  table_lines.append("> Download files from the links in the table above, instead of the assets list.")
+    manifests.sort(key=lambda x: x["name"])
+    for manifest in manifests:
+        worker_url = (
+            args.worker_url or "https://gh-releases.sophiaasophieee.workers.dev"
+        )
+        download_url = f"{worker_url}/{args.repository}/releases/download/{get_tag_name(args.tag_name)}/{manifest['name']}"
+        download_link = f"[{manifest['name']}]({download_url})"
+        line = f"| {download_link} | {pretty_size(manifest['size'])} | <sub><sup>`{manifest['hash']}`</sub></sup> |"
+        table_lines.append(line)
 
-  table_lines.append(tag_end)
-  table_str = "\n".join(table_lines)
-  table_regex = f"{tag_start}.+{tag_end}"
-  body = release["body"] or ""
+    table_lines.append("> [!IMPORTANT]")
+    table_lines.append(
+        "> Download files from the links in the table above, instead of the assets list."
+    )
 
-  if re.findall(table_regex, body, flags=re.S):
-    body = re.sub(table_regex, table_str, body, flags=re.S)
-  else:
-    body += f"\n\n{table_str}"
-  
-  url = f"https://api.github.com/repos/{args.repository}/releases/{release['id']}"
-  payload = {
-    "tag_name": get_tag_name(args.tag_name),
-    "target_commitish": args.target_commitish or None,
-    "name": args.name or None, 
-    "body": body,
-    "draft": json.loads(args.draft) if args.draft else None,
-    "prerelease": json.loads(args.prerelease) if args.prerelease else None,
-    "discussion_category_name": args.discussion_category_name or None,
-    "make_latest": args.make_latest or None
-  }
-  payload = {k: v for k, v in payload.items() if v is not None}
-  r = session.patch(url, json=payload)
-  r.raise_for_status()
+    table_lines.append(tag_end)
+    table_str = "\n".join(table_lines)
+    table_regex = f"{tag_start}.+{tag_end}"
+    body = release["body"] or ""
+
+    if re.findall(table_regex, body, flags=re.S):
+        body = re.sub(table_regex, table_str, body, flags=re.S)
+    else:
+        body += f"\n\n{table_str}"
+
+    url = f"https://api.github.com/repos/{args.repository}/releases/{release['id']}"
+    payload = {
+        "tag_name": get_tag_name(args.tag_name),
+        "target_commitish": args.target_commitish or None,
+        "name": args.name or None,
+        "body": body,
+        "draft": json.loads(args.draft) if args.draft else None,
+        "prerelease": json.loads(args.prerelease) if args.prerelease else None,
+        "discussion_category_name": args.discussion_category_name or None,
+        "make_latest": args.make_latest or None,
+    }
+    payload = {k: v for k, v in payload.items() if v is not None}
+    r = session.patch(url, json=payload)
+    r.raise_for_status()
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser() 
