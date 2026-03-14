@@ -31,77 +31,109 @@ def pretty_size(size, decimal_places=2):
   return f"{size:.{decimal_places}f} {unit}"
 
 def upload_asset(args, release, assets, name, data, length):
-  for asset in assets:
-    if asset["name"] != name:
-      continue
-    logging.warning(f"asset {name} has already been uploaded, deleting now")
-    delete_asset_url = f"https://api.github.com/repos/{args.repository}/releases/assets/{asset['id']}"
-    delete_response = session.delete(delete_asset_url)
-    delete_response.raise_for_status()
+    for asset in assets:
+        if asset["name"] != name:
+            continue
+        logging.warning(f"asset {name} has already been uploaded, deleting now")
+        delete_asset_url = f"https://api.github.com/repos/{args.repository}/releases/assets/{asset['id']}"
+        delete_response = session.delete(delete_asset_url)
+        delete_response.raise_for_status()
 
-  url = f"https://uploads.github.com/repos/{args.repository}/releases/{release['id']}/assets?name={name}"
-  r = session.post(url, data=data, timeout=httpx.Timeout(None), headers={
-    "Content-Type": "application/octet-stream",
-    "Content-Length": str(length)
-  })
-  r.raise_for_status()
+    url = f"https://uploads.github.com/repos/{args.repository}/releases/{release['id']}/assets?name={name}"
+    r = session.post(
+        url,
+        data=data,
+        timeout=httpx.Timeout(None),
+        headers={
+            "Content-Type": "application/octet-stream",
+            "Content-Length": str(length),
+        },
+    )
+    r.raise_for_status()
+
+
+def handle_matching_assets(args, assets, predicate):
+    for asset in assets:
+        if not predicate(asset["name"]):
+            continue
+        delete_asset_url = f"https://api.github.com/repos/{args.repository}/releases/assets/{asset['id']}"
+        session.delete(delete_asset_url).raise_for_status()
+
 
 def process_file(args, release, assets, path):
-  chunk_names = []
-  original_size = path.stat().st_size
-  big_chunk_size = int(args.big_chunk_size) if args.big_chunk_size else 2000*1024*1024
-  big_chunk_size = min(original_size, big_chunk_size)
-  small_chunk_size = 25*1024*1024 
+    chunk_names = []
+    original_size = path.stat().st_size
+    big_chunk_size = (
+        int(args.big_chunk_size) if args.big_chunk_size else 2000 * 1024 * 1024
+    )
+    big_chunk_size = min(original_size, big_chunk_size)
+    small_chunk_size = 25 * 1024 * 1024
 
-  total_size = path.stat().st_size
-  big_chunks = math.ceil(total_size / big_chunk_size)
-  sha_hash = hashlib.sha256()
+    total_size = path.stat().st_size
+    big_chunks = math.ceil(total_size / big_chunk_size)
 
-  total_uploaded = 0
-  with open(path, "rb") as read_file:
-    for i in range(0, big_chunks):
-      new_name = f"{path.name}.{i:04}"
-      big_size = get_size(total_size, big_chunk_size, big_chunks, i)
-      small_chunks = math.ceil(big_size / small_chunk_size)
+    if original_size < 2000 * 1024 * 1024 and big_chunks == 1:
+        handle_matching_assets(
+            args,
+            assets,
+            lambda name: name == f"{path.name}.manifest"
+            or re.compile(rf"^{re.escape(path.name)}\.\d{{4}}$").match(name),
+        )
+        with open(path, "rb") as read_file:
+            upload_asset(args, release, assets, path.name, read_file, original_size)
+        return
 
-      def chunk_generator():
-        nonlocal total_uploaded
-        for j in range(0, small_chunks):
-          small_size = get_size(big_size, small_chunk_size, small_chunks, j)
-          data = read_file.read(small_size)
-          sha_hash.update(data)
-          yield data
-          total_uploaded += len(data)
-          logger.info(f"uploaded {pretty_size(total_uploaded)} / {pretty_size(total_size)} of {path.name}")
-      
-      chunk_names.append(new_name)
-      upload_asset(args, release, assets, new_name, chunk_generator(), big_size)
+    sha_hash = hashlib.sha256()
 
-  manifest = {
-    "name": path.name,
-    "hash": sha_hash.hexdigest(),
-    "size": original_size,
-    "chunk_size": big_chunk_size,
-    "chunks": chunk_names
-  }
-  manifest_json = json.dumps(manifest, indent=2).encode()
-  manifest_name = f"{path.name}.manifest"
+    total_uploaded = 0
+    with open(path, "rb") as read_file:
+        for i in range(0, big_chunks):
+            new_name = f"{path.name}.{i:04}"
+            big_size = get_size(total_size, big_chunk_size, big_chunks, i)
+            small_chunks = math.ceil(big_size / small_chunk_size)
 
-  upload_asset(args, release, assets, manifest_name, manifest_json, len(manifest_json))
+            def chunk_generator():
+                nonlocal total_uploaded
+                for j in range(0, small_chunks):
+                    small_size = get_size(big_size, small_chunk_size, small_chunks, j)
+                    data = read_file.read(small_size)
+                    sha_hash.update(data)
+                    yield data
+                    total_uploaded += len(data)
+                    logger.info(
+                        f"uploaded {pretty_size(total_uploaded)} / {pretty_size(total_size)} of {path.name}"
+                    )
 
-#get the release we will use, creating one if needed
+            chunk_names.append(new_name)
+            upload_asset(args, release, assets, new_name, chunk_generator(), big_size)
+
+    manifest = {
+        "name": path.name,
+        "hash": sha_hash.hexdigest(),
+        "size": original_size,
+        "chunk_size": big_chunk_size,
+        "chunks": chunk_names,
+    }
+    manifest_json = json.dumps(manifest, indent=2).encode()
+    manifest_name = f"{path.name}.manifest"
+
+    upload_asset(
+        args, release, assets, manifest_name, manifest_json, len(manifest_json)
+    )
+
+# get the release we will use, creating one if needed
 def get_release(args, retry=False):
-  url = f"https://api.github.com/repos/{args.repository}/releases"
-  r = session.get(url)
-  r.raise_for_status()
-  releases = r.json()
+    url = f"https://api.github.com/repos/{args.repository}/releases"
+    r = session.get(url)
+    r.raise_for_status()
+    releases = r.json()
 
-  for release in releases:
-    if get_tag_name(release["tag_name"]) == get_tag_name(args.tag_name):
-      return release
-  return create_release(args)
+    for release in releases:
+        if get_tag_name(release["tag_name"]) == get_tag_name(args.tag_name):
+            return release
+    return create_release(args)
 
-#create a new release
+# create a new release
 def create_release(args):
   url = f"https://api.github.com/repos/{args.repository}/releases"
   payload = {
@@ -129,21 +161,21 @@ def find_next_page(link_header):
       return url
 
 def get_assets(release, args):
-  assets_url = f"https://api.github.com/repos/{args.repository}/releases/{release['id']}/assets?per_page=100"
-  response = session.get(assets_url)
-  response.raise_for_status()
-  assets_list = response.json()
+    assets_url = f"https://api.github.com/repos/{args.repository}/releases/{release['id']}/assets?per_page=100"
+    response = session.get(assets_url)
+    response.raise_for_status()
+    assets_list = response.json()
 
-  next_page = find_next_page(response.headers.get("link"))
-  while next_page:
-    next_response = session.get(next_page)
-    next_response.raise_for_status()
-    assets_list += next_response.json()
-    next_page = find_next_page(next_response.headers.get("link"))
-  
-  return assets_list
+    next_page = find_next_page(response.headers.get("link"))
+    while next_page:
+        next_response = session.get(next_page)
+        next_response.raise_for_status()
+        assets_list += next_response.json()
+        next_page = find_next_page(next_response.headers.get("link"))
 
-#update release body to include links to the cf worker
+    return assets_list
+
+# update release body to include links to the cf worker
 def update_release_body(args):
   tag_start = "<!-- START_BIG_ASSET_LIST_DO_NOT_REMOVE -->"
   tag_end = "<!-- END_BIG_ASSET_LIST_DO_NOT_REMOVE -->"
