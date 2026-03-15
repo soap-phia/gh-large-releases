@@ -215,9 +215,7 @@ def update_release_body(args, processed_files):
       "Accept": "application/octet-stream"
     })
         manifest = r.json()
-        worker_url = (
-            args.worker_url or "https://gh-releases.sophiaasophieee.workers.dev"
-        )
+        worker_url = args.worker_url or "https://gh-releases.ading2210.workers.dev"
         download_url = f"{worker_url}/{args.repository}/releases/download/{get_tag_name(args.tag_name)}/{manifest['name']}"
         manifests.append(
             {

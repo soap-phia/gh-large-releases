@@ -1,5 +1,5 @@
-name: "gh-large-releases-soap"
-author: "soap-phia"
+name: "gh-large-releases"
+author: "ading2210"
 description: "Upload files larger than 2GB to GitHub Releases"
 
 inputs:
