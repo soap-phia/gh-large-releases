@@ -15,20 +15,23 @@ logging.basicConfig()
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+
 def get_tag_name(tag_name):
-  return tag_name.replace("refs/tags/", "", 1)
+    return tag_name.replace("refs/tags/", "", 1)
+
 
 def get_size(total_size, chunk_size, chunk_count, i):
-  if i == chunk_count - 1 and total_size % chunk_size > 0:
-    return total_size % chunk_size
-  return chunk_size
+    if i == chunk_count - 1 and total_size % chunk_size > 0:
+        return total_size % chunk_size
+    return chunk_size
+
 
 def pretty_size(size, decimal_places=2):
-  for unit in ["B", "KiB", "MiB", "GiB", "TiB", "PiB"]:
-    if size < 1024.0 or unit == "PiB":
-      break
-    size /= 1024.0
-  return f"{size:.{decimal_places}f} {unit}"
+    for unit in ["B", "KiB", "MiB", "GiB", "TiB", "PiB"]:
+        if size < 1024.0 or unit == "PiB":
+            break
+        size /= 1024.0
+    return f"{size:.{decimal_places}f} {unit}"
 
 def upload_asset(args, release, assets, name, data, length):
     for asset in assets:
@@ -139,6 +142,7 @@ def process_file(args, release, assets, path):
         "is_small": False,
     }
 
+
 # get the release we will use, creating one if needed
 def get_release(args, retry=False):
     url = f"https://api.github.com/repos/{args.repository}/releases"
@@ -151,32 +155,39 @@ def get_release(args, retry=False):
             return release
     return create_release(args)
 
+
 # create a new release
 def create_release(args):
-  url = f"https://api.github.com/repos/{args.repository}/releases"
-  payload = {
-    "tag_name": get_tag_name(args.tag_name),
-    "target_commitish": args.target_commitish or None,
-    "name": args.name or None, 
-    "body": args.body or None,
-    "draft": json.loads(args.draft) if args.draft else None,
-    "prerelease": json.loads(args.prerelease) if args.prerelease else None,
-    "discussion_category_name": args.discussion_category_name or None,
-    "generate_release_notes": json.loads(args.generate_release_notes) if args.generate_release_notes else None, 
-    "make_latest": args.make_latest or None
-  }
-  payload = {k: v for k, v in payload.items() if v is not None}
-  r = session.post(url, json=payload)
-  r.raise_for_status()
-  return r.json()
+    url = f"https://api.github.com/repos/{args.repository}/releases"
+    payload = {
+        "tag_name": get_tag_name(args.tag_name),
+        "target_commitish": args.target_commitish or None,
+        "name": args.name or None,
+        "body": args.body or None,
+        "draft": json.loads(args.draft) if args.draft else None,
+        "prerelease": json.loads(args.prerelease) if args.prerelease else None,
+        "discussion_category_name": args.discussion_category_name or None,
+        "generate_release_notes": (
+            json.loads(args.generate_release_notes)
+            if args.generate_release_notes
+            else None
+        ),
+        "make_latest": args.make_latest or None,
+    }
+    payload = {k: v for k, v in payload.items() if v is not None}
+    r = session.post(url, json=payload)
+    r.raise_for_status()
+    return r.json()
+
 
 def find_next_page(link_header):
-  if not link_header:
-    return None
-  link_regex = r'<(.+?)>; rel="(.+?)"'
-  for url, rel in re.findall(link_regex, link_header):
-    if rel == "next":
-      return url
+    if not link_header:
+        return None
+    link_regex = r'<(.+?)>; rel="(.+?)"'
+    for url, rel in re.findall(link_regex, link_header):
+        if rel == "next":
+            return url
+
 
 def get_assets(release, args):
     assets_url = f"https://api.github.com/repos/{args.repository}/releases/{release['id']}/assets?per_page=100"
@@ -199,11 +210,11 @@ def update_release_body(args, processed_files):
     tag_start = "<!-- START_BIG_ASSET_LIST_DO_NOT_REMOVE -->"
     tag_end = "<!-- END_BIG_ASSET_LIST_DO_NOT_REMOVE -->"
     table_lines = [
-    tag_start,
-    "Release files generated with [ading2210/gh-large-releases](https://github.com/ading2210/gh-large-releases).",
-    "| File Name | Size | SHA-256 Hash |", 
-    "| --------- | ---- | ------------ |"
-  ]
+        tag_start,
+        "Release files generated with [ading2210/gh-large-releases](https://github.com/ading2210/gh-large-releases).",
+        "| File Name | Size | SHA-256 Hash |",
+        "| --------- | ---- | ------------ |",
+    ]
     release = get_release(args)
     assets = get_assets(release, args)
 
@@ -211,9 +222,7 @@ def update_release_body(args, processed_files):
     for asset in assets:
         if not asset["name"].endswith(".manifest"):
             continue
-        r = session.get(asset["url"], headers={
-      "Accept": "application/octet-stream"
-    })
+        r = session.get(asset["url"], headers={"Accept": "application/octet-stream"})
         manifest = r.json()
         worker_url = args.worker_url or "https://gh-releases.ading2210.workers.dev"
         download_url = f"{worker_url}/{args.repository}/releases/download/{get_tag_name(args.tag_name)}/{manifest['name']}"
@@ -313,7 +322,7 @@ if __name__ == "__main__":
                 result = process_file(args, release, assets, file_path)
                 if result:
                     processed_files.append(result)
-            except Exception as e:
+            except Exception:
                 logger.error("caught error:")
                 logger.error(traceback.format_exc())
                 logger.error("retrying file upload")
