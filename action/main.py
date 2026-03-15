@@ -79,9 +79,21 @@ def process_file(args, release, assets, path):
             lambda name: name == f"{path.name}.manifest"
             or re.compile(rf"^{re.escape(path.name)}\.\d{{4}}$").match(name),
         )
+        sha_hash = hashlib.sha256()
         with open(path, "rb") as read_file:
+            while True:
+                data = read_file.read(small_chunk_size)
+                if not data:
+                    break
+                sha_hash.update(data)
+            read_file.seek(0)
             upload_asset(args, release, assets, path.name, read_file, original_size)
-        return
+        return {
+            "name": path.name,
+            "size": original_size,
+            "hash": sha_hash.hexdigest(),
+            "is_small": True,
+        }
 
     sha_hash = hashlib.sha256()
 
@@ -120,6 +132,12 @@ def process_file(args, release, assets, path):
     upload_asset(
         args, release, assets, manifest_name, manifest_json, len(manifest_json)
     )
+    return {
+        "name": path.name,
+        "size": original_size,
+        "hash": sha_hash.hexdigest(),
+        "is_small": False,
+    }
 
 # get the release we will use, creating one if needed
 def get_release(args, retry=False):
@@ -175,8 +193,9 @@ def get_assets(release, args):
 
     return assets_list
 
+
 # update release body to include links to the cf worker
-def update_release_body(args):
+def update_release_body(args, processed_files):
     tag_start = "<!-- START_BIG_ASSET_LIST_DO_NOT_REMOVE -->"
     tag_end = "<!-- END_BIG_ASSET_LIST_DO_NOT_REMOVE -->"
     table_lines = [
@@ -195,16 +214,37 @@ def update_release_body(args):
         r = session.get(asset["url"], headers={
       "Accept": "application/octet-stream"
     })
-        manifests.append(r.json())
-
-    manifests.sort(key=lambda x: x["name"])
-    for manifest in manifests:
+        manifest = r.json()
         worker_url = (
             args.worker_url or "https://gh-releases.sophiaasophieee.workers.dev"
         )
         download_url = f"{worker_url}/{args.repository}/releases/download/{get_tag_name(args.tag_name)}/{manifest['name']}"
-        download_link = f"[{manifest['name']}]({download_url})"
-        line = f"| {download_link} | {pretty_size(manifest['size'])} | <sub><sup>`{manifest['hash']}`</sub></sup> |"
+        manifests.append(
+            {
+                "name": manifest["name"],
+                "size": manifest["size"],
+                "hash": manifest["hash"],
+                "download_url": download_url,
+            }
+        )
+
+    for info in processed_files:
+        if not info["is_small"]:
+            continue
+        download_url = f"https://github.com/{args.repository}/releases/download/{get_tag_name(args.tag_name)}/{info['name']}"
+        manifests.append(
+            {
+                "name": info["name"],
+                "size": info["size"],
+                "hash": info["hash"],
+                "download_url": download_url,
+            }
+        )
+
+    manifests.sort(key=lambda x: x["name"])
+    for entry in manifests:
+        download_link = f"[{entry['name']}]({entry['download_url']})"
+        line = f"| {download_link} | {pretty_size(entry['size'])} | <sub><sup>`{entry['hash']}`</sub></sup> |"
         table_lines.append(line)
 
     table_lines.append("> [!IMPORTANT]")
@@ -237,42 +277,50 @@ def update_release_body(args):
     r = session.patch(url, json=payload)
     r.raise_for_status()
 
+
 if __name__ == "__main__":
-  parser = argparse.ArgumentParser() 
-  parser.add_argument("--repository")
-  parser.add_argument("--files")
-  parser.add_argument("--token")
-  parser.add_argument("--workspace")
-  parser.add_argument("--worker_url")
-  parser.add_argument("--tag_name")
-  parser.add_argument("--target_commitish")
-  parser.add_argument("--name")
-  parser.add_argument("--body")
-  parser.add_argument("--draft")
-  parser.add_argument("--prerelease")
-  parser.add_argument("--make_latest")
-  parser.add_argument("--generate_release_notes")
-  parser.add_argument("--discussion_category_name")
-  parser.add_argument("--big_chunk_size")
-  args = parser.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--repository")
+    parser.add_argument("--files")
+    parser.add_argument("--token")
+    parser.add_argument("--workspace")
+    parser.add_argument("--worker_url")
+    parser.add_argument("--tag_name")
+    parser.add_argument("--target_commitish")
+    parser.add_argument("--name")
+    parser.add_argument("--body")
+    parser.add_argument("--draft")
+    parser.add_argument("--prerelease")
+    parser.add_argument("--make_latest")
+    parser.add_argument("--generate_release_notes")
+    parser.add_argument("--discussion_category_name")
+    parser.add_argument("--big_chunk_size")
+    args = parser.parse_args()
 
-  session.headers.update({
-    "Accept": "application/vnd.github+json",
-    "Authorization": f"Bearer {args.token}",
-    "X-GitHub-Api-Version": "2022-11-28"
-  })
-  release = get_release(args)
-  assets = get_assets(release, args)
+    session.headers.update(
+        {
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {args.token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+    )
+    release = get_release(args)
+    assets = get_assets(release, args)
 
-  base_path = pathlib.Path(args.workspace).resolve()
-  for file_glob in args.files.split("\n"):
-    for file_path in base_path.glob(file_glob.strip()):
-      try:
-        process_file(args, release, assets,file_path)
-      except Exception as e:
-        logger.error("caught error:")
-        logger.error(traceback.format_exc())
-        logger.error("retrying file upload")
-        process_file(args, release, assets,file_path)
+    base_path = pathlib.Path(args.workspace).resolve()
+    processed_files = []
+    for file_glob in args.files.split("\n"):
+        for file_path in base_path.glob(file_glob.strip()):
+            try:
+                result = process_file(args, release, assets, file_path)
+                if result:
+                    processed_files.append(result)
+            except Exception as e:
+                logger.error("caught error:")
+                logger.error(traceback.format_exc())
+                logger.error("retrying file upload")
+                result = process_file(args, release, assets, file_path)
+                if result:
+                    processed_files.append(result)
 
-  update_release_body(args)
+    update_release_body(args, processed_files)
