@@ -48,10 +48,10 @@ def upload_asset(args, release, assets, name, data, length):
 
 def handle_matching_assets(args, assets, predicate):
     for asset in assets:
-        if not predicate(asset["name"]):
-            continue
-        delete_asset_url = f"https://api.github.com/repos/{args.repository}/releases/assets/{asset['id']}"
-        session.delete(delete_asset_url).raise_for_status()
+      if not predicate(asset["name"]):
+        continue
+      delete_asset_url = f"https://api.github.com/repos/{args.repository}/releases/assets/{asset['id']}"
+      session.delete(delete_asset_url).raise_for_status()
 
 
 def process_file(args, release, assets, path):
@@ -80,10 +80,10 @@ def process_file(args, release, assets, path):
       read_file.seek(0)
       upload_asset(args, release, assets, path.name, read_file, original_size)
     return {
-        "name": path.name,
-        "size": original_size,
-        "hash": sha_hash.hexdigest(),
-        "is_small": True,
+      "name": path.name,
+      "size": original_size,
+      "hash": sha_hash.hexdigest(),
+      "is_small": True,
     }
   sha_hash = hashlib.sha256()
 
@@ -211,15 +211,15 @@ def update_release_body(args, processed_files):
     )
   for info in processed_files:
       if not info["is_small"]:
-          continue
+        continue
       download_url = f"https://github.com/{args.repository}/releases/download/{get_tag_name(args.tag_name)}/{info['name']}"
       manifests.append(
-          {
-              "name": info["name"],
-              "size": info["size"],
-              "hash": info["hash"],
-              "download_url": download_url,
-          }
+        {
+          "name": info["name"],
+          "size": info["size"],
+          "hash": info["hash"],
+          "download_url": download_url,
+        }
       )
   manifests.sort(key=lambda x: x["name"])
   for entry in manifests:
