@@ -86,12 +86,9 @@ async function get_assets(repo, tag, env) {
   return assets;
 }
 
-function no_manifest_response(request, response) {
-  let headers = new Headers(response.headers);
-  if (request.method === "HEAD") {
-    return new Response(null, { status: response.status, headers });
-  }
-  return new Response(response.body, { status: response.status, headers });
+function no_manifest_response(request, url) {
+  let status = request.method === "HEAD" ? 302 : 307;
+  return Response.redirect(url, status);
 }
 
 async function fetch_big_chunks(request, repo, tag, file, env) {
@@ -106,7 +103,7 @@ async function fetch_big_chunks(request, repo, tag, file, env) {
     let direct_response = await fetch(direct_url);
 
     if (direct_response.ok)
-      return no_manifest_response(request, direct_response);
+      return no_manifest_response(request, direct_url);
 
     if (!env.GITHUB_TOKEN)
       return new Response("404 not found - no public asset or manifest available", { status: 404 });
@@ -118,12 +115,7 @@ async function fetch_big_chunks(request, repo, tag, file, env) {
       let direct_asset = assets[file];
       if (!direct_asset)
         return new Response("404 not found - no asset or manifest available", { status: 404 });
-      let direct_response = await fetch(direct_asset.url, github_request_options(env, {
-        accept: "application/octet-stream"
-      }));
-      if (!direct_response.ok)
-        return new Response("404 not found - failed to download asset", { status: 404 });
-      return no_manifest_response(request, direct_response);
+      return no_manifest_response(request, direct_asset.browser_download_url || direct_url);
     }
 
     response = await fetch(manifest_asset.url, github_request_options(env, {
