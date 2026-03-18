@@ -46,12 +46,12 @@ def upload_asset(args, release, assets, name, data, length):
   })
   r.raise_for_status()
 
-def handle_matching_assets(args, assets, predicate):
-    for asset in assets:
-      if not predicate(asset["name"]):
-        continue
-      delete_asset_url = f"https://api.github.com/repos/{args.repository}/releases/assets/{asset['id']}"
-      session.delete(delete_asset_url).raise_for_status()
+def delete_matching_assets(args, assets, predicate):
+  for asset in assets:
+    if not (asset["name"] == f"{predicate.name}.manifest" or re.compile(rf"^{re.escape(predicate.name)}\.\d{{4}}$").match(asset["name"])):
+      continue
+    delete_asset_url = f"https://api.github.com/repos/{args.repository}/releases/assets/{asset['id']}"
+    session.delete(delete_asset_url).raise_for_status()
 
 
 def process_file(args, release, assets, path):
@@ -64,12 +64,7 @@ def process_file(args, release, assets, path):
   total_size = path.stat().st_size
   big_chunks = math.ceil(total_size / big_chunk_size)
   if original_size < 2000 * 1024 * 1024 and big_chunks == 1:
-    handle_matching_assets(
-      args,
-      assets,
-      lambda name: name == f"{path.name}.manifest"
-      or re.compile(rf"^{re.escape(path.name)}\.\d{{4}}$").match(name),
-    )
+    delete_matching_assets(args, assets, path)
     sha_hash = hashlib.sha256()
     with open(path, "rb") as read_file:
       while True:
@@ -210,17 +205,17 @@ def update_release_body(args, processed_files):
       }
     )
   for info in processed_files:
-      if not info["is_small"]:
-        continue
-      download_url = f"https://github.com/{args.repository}/releases/download/{get_tag_name(args.tag_name)}/{info['name']}"
-      manifests.append(
-        {
-          "name": info["name"],
-          "size": info["size"],
-          "hash": info["hash"],
-          "download_url": download_url,
-        }
-      )
+    if not info["is_small"]:
+      continue
+    download_url = f"https://github.com/{args.repository}/releases/download/{get_tag_name(args.tag_name)}/{info['name']}"
+    manifests.append(
+      {
+        "name": info["name"],
+        "size": info["size"],
+        "hash": info["hash"],
+        "download_url": download_url,
+      }
+    )
   manifests.sort(key=lambda x: x["name"])
   for entry in manifests:
     download_link = f"[{entry['name']}]({entry['download_url']})"
